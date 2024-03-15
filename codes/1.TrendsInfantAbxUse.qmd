@@ -1,0 +1,165 @@
+---
+title: "Trends in Infant Antibiotic Use in British Columbia"
+format: html
+editor: visual
+---
+
+```{r import library}
+# data wrangling
+library(tidyverse)
+# model fitting
+library(mgcv)
+# color scale for blind
+# see https://github.com/clauswilke/colorblindr for installation instructions
+library(colorblindr)
+```
+
+# Import data
+
+```{r import data}
+df_abx <- read_csv("../data/infantAbx.csv") 
+```
+
+# Descriptive statistics
+
+```{r descriptive}
+df_desc <- df_abx %>% 
+  filter(year >= 2001) %>% 
+  mutate(rate=N_Abx/N*1000)
+total_abx <- sum(df_desc$N_Abx);total_abx
+total_N <- sum(df_desc$N);total_N
+rate <- total_abx/total_N * 1000;rate
+(df_desc$N_Abx[35:36]-df_desc$N_Abx[1:2])/df_desc$N_Abx[1:2]*100
+(df_desc$N[35:36]-df_desc$N[1:2])/df_desc$N[1:2]*100
+(df_desc$rate[35:36]-df_desc$rate[1:2])/df_desc$rate[1:2]*100
+df_desc %>% 
+  group_by(sex) %>% 
+  summarise(total_abx = sum(N_Abx),
+            total_N = sum(N),
+            rate = total_abx / total_N * 1000)
+
+df_desc %>% 
+  group_by(year) %>% 
+  summarise(total_abx = sum(N_Abx),
+            total_N = sum(N),
+            rate = total_abx / total_N * 1000) -> df_desc_year
+
+decline_per_year <- glm(total_abx~year,offset = log(total_N),family='poisson',data=df_desc_year)
+year_decline <- summary(decline_per_year)
+
+(df_desc_year$rate[18]-df_desc_year$rate[1])/df_desc_year$rate[1]*100
+
+```
+
+# Negative binomial regression model
+
+```{r model fitting}
+df_model <- df_abx %>% 
+  mutate(sex=as.numeric(sex=="Male")) %>% 
+  mutate(after2005 = as.numeric(year>2005),
+         after2005year = after2005*year)
+
+master_formula <- as.formula("N_Abx~sex+year+after2005+after2005year")
+nb_model <- gam(N_Abx~sex+year+after2005+after2005year,
+                offset=log(N),family=nb(),data=df_model)
+
+summary(nb_model)
+```
+
+# Visualization
+
+```{r visualization}
+df_fv <- data.frame(year = df_abx$year,
+                    sex = df_abx$sex,
+                    N = df_abx$N,
+                    observed = df_abx$N_Abx,
+                    nb = nb_model$fitted.values,
+                    sd = predict(nb_model,se.fit = T)$se.fit) %>%  
+  mutate(observed=observed/N*1000,
+         CI_upper = (nb/N + qnorm(0.975)*sd)*1000,
+         CI_lower = (nb/N - qnorm(0.975)*sd)*1000,
+         nb = nb/N*1000) %>% 
+  select(-N,-sd) %>% 
+  pivot_longer(cols=-c(1:2,5:6),values_to="rate",names_to="type") %>% 
+  mutate(type = factor(type,levels=c("observed",
+                                     'nb'),
+                       labels = c("Observed","Model-based"))) %>% 
+  mutate(CI_upper = ifelse(type=="Observed",NA,CI_upper),
+         CI_lower = ifelse(type=="Observed",NA,CI_lower))
+
+ggplot(data=df_fv,
+       aes(x=year,y=rate,color=type,linetype=sex,
+           ymin=CI_lower,ymax=CI_upper))+
+  geom_point() +
+  geom_line(size=2.5,alpha=0.8) +
+  geom_errorbar(width=0.5) +
+  # facet_grid(.~sex) +
+  theme_classic() +
+  ylab("Rate of infant antibiotic prescriptions (per 1,000)") +
+  xlab("Year") +
+  ylim(c(0,NA))+
+  scale_x_continuous(limits = c(2000.5,2018.5),breaks=seq(2001,2018,by=4)) +
+  scale_color_OkabeIto() + 
+  guides(color=guide_legend(nrow=2,byrow=TRUE),
+         linetype=guide_legend(nrow=2,byrow=TRUE))+
+  theme(legend.title=element_blank(),
+        legend.position = 'top',
+        text = element_text(size=22),
+        legend.key.width = unit(2,"cm")) -> gg.plot
+
+ggsave("../figures/fig1.jpeg",gg.plot,dpi=600,width=15,height=9)
+```
+
+# What-if scenarios
+
+```{r what-if scenarios}
+
+model_matrix <- model.matrix(nb_model)
+
+nb_model_predictor <- function(beta,X=model_matrix,N=df_model$N){
+  exp(X %*% beta) * N
+}
+
+flat_data <- model_matrix %>% 
+  as.data.frame() %>% 
+  mutate(year = ifelse(year>=2001,2001,year)) %>% 
+  mutate(after2005 = as.numeric(year>2005),
+         after2005year = after2005*year) %>% 
+  as.matrix()
+
+base_param <- nb_model$coefficients
+
+df_scenario <- data.frame(year = df_abx$year,
+                          sex = df_abx$sex,
+                           N = df_abx$N,
+                          base = nb_model_predictor(base_param),
+                          flat = nb_model_predictor(base_param,flat_data)) %>% 
+  filter(year >= 2001) %>% 
+  mutate(base=base/N*1000,
+        flat = flat/N*1000) %>% 
+  mutate(mid = (base+flat)/2) %>% 
+  select(-N) %>% 
+  pivot_longer(cols=-c(1:2),values_to="rate",names_to="type") %>% 
+  mutate(type = factor(type,levels=c("base",
+                                     "flat",
+                                     'mid'),
+                       labels = c("Base","Flat","Mid")))
+
+ggplot(data=df_scenario,
+       aes(x=year,y=rate,color=type))+
+  geom_point() +
+  geom_line(size=2,alpha=0.8) +
+  facet_grid(.~sex) +
+  theme_classic() +
+  ylab("Rate of infant antibiotic prescriptions (per 1,000)") +
+  xlab("Year") +
+  ylim(c(0,1500))+
+    scale_x_continuous(limits = c(2000.5,2018.5),breaks=seq(2001,2018,by=4)) +
+  scale_color_OkabeIto() +
+  labs(color='What-if scenarios: ') +
+  theme(legend.position = 'top',
+        text = element_text(size=20),
+        legend.key.width = unit(2,"cm")) -> gg.scenarios
+gg.scenarios
+ggsave("../figures/fig4.jpeg",gg.scenarios,dpi=600,width = 10)
+```

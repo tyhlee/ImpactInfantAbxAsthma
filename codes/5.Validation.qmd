@@ -1,0 +1,452 @@
+---
+title: "Validation of the base (factual) scenario"
+format: html
+editor: visual
+---
+
+# 
+
+```{r import packages}
+library(JuliaCall)
+library(tidyverse)
+library(gridExtra)
+library(grid)
+library(ggpubr)
+library(colorblindr)
+fig_setting <- fig_theme <- theme_classic() +
+  theme(legend.position = 'top')
+select <- dplyr::select
+options(warn=-1)
+julia_setup()
+julia_eval("pwd()")
+julia_eval("using LEAP, JLD, JLD2, Setfield")
+```
+
+```{julia simulation run}
+# using LEAP, JLD, JLD2, Setfield;
+# simulation = LEAP.set_up(111,"BC",2001,18,"full","M3");
+# validation_run = LEAP.process(simulation,1,false,true);
+# JLD2.save("validation/validation_BC.jld","output",validation_run);
+```
+
+```{r read results}
+julia_command("using JLD2")
+julia_command("using CodecZlib")
+julia_assign("result_dir", "validation/validation_BC.jld")
+results <- julia_eval('JLD2.load(result_dir)')$output
+fig_dir <<- "figures/"
+save_fig <<- T
+```
+
+```{r validation function}
+validator <- function(results,
+                      baseline_year=2001,
+                      chosen_province='BC',
+                      growth_type = "M3",
+                      pop_years = c(seq(2001,2016,by=2),2018),
+                      plot_dims = c(2,3),
+                      save_fig=T){
+  save_plot <- function(gg_obj,nam,fig.width=10,fig.height=7,fig.dpi=600,save=save_fig){
+    if(save){
+      ggsave(paste0(fig_dir,'/',nam),gg_obj,width = fig.width,height=fig.height,dpi = fig.dpi)
+    } else{
+      "plot not saved"
+    }
+  }
+  
+  # setting
+  max_year <- nrow(results[[1]])
+  max_age <- ncol(results[[2]]$immigration[,,1])
+  
+  longer_df <- function(type){
+    tmp_df <- results$outcome_matrix[type][[1]]
+    tmp_df_male <- tmp_df[,,2] %>% 
+      as.data.frame() %>% 
+      mutate(year = row_number()+baseline_year-1) %>% 
+      pivot_longer(-year,names_to="age",values_to="n") %>% 
+      mutate(age = as.numeric(str_remove(age,"V"))-1) %>% 
+      mutate(sex="male")
+    tmp_df_female <- tmp_df[,,1] %>% 
+      as.data.frame() %>% 
+      mutate(year = row_number()+baseline_year-1) %>% 
+      pivot_longer(-year,names_to="age",values_to="n") %>% 
+      mutate(age = as.numeric(str_remove(age,"V"))-1) %>% 
+      mutate(sex="female")  
+    
+    return(rbind(tmp_df_male,tmp_df_female))
+  }
+  
+  extract_df <- function(type,sex='both',year='all',age='all'){
+    if(!is.numeric(sex)){
+      sex = ifelse(sex=='male',2,
+                   ifelse(sex=='female',1,
+                          sex))
+    }
+    if(year[1]=='all'){
+      year <- 1:max_year
+    }
+    if(age[1]=='all'){
+      age <- 1:max_age
+    }
+    
+    if(type %in% c("exacerbation_severity","exacerbation_by_severity")){
+      tmp_result <- c()
+      for (j in 1:4){
+        if (sex=="both"){
+          tmp_result[[j]] <- results[[2]][type][[1]][year,age,1,j] + results[[2]][type][[1]][year,age,2,j]
+        } else{
+          tmp_result[[j]] <- results[[2]][type][[1]][year,age,sex,j]
+        }
+      }
+      
+      tmp_result <- tmp_result %>% lapply(.,function(x){
+        dim_x <- dim(x)
+        matrix(sapply(x,identity),nrow =dim_x[1],dim_x[2])
+      })
+      
+      return(tmp_result)
+    } else if(type %in% c("control")){
+      tmp_result <- c()
+      for (j in 1:3){
+        if (sex=="both"){
+          tmp_result[[j]] <- results[[2]][type][[1]][year,age,1,j] + results[[2]][type][[1]][year,age,2,j]
+        } else{
+          tmp_result[[j]] <- results[[2]][type][[1]][year,age,sex,j]
+        }
+      }
+      
+      tmp_result <- tmp_result %>% lapply(.,function(x){
+        dim_x <- dim(x)
+        matrix(sapply(x,identity),nrow =dim_x[1],dim_x[2])
+      })
+      
+      return(tmp_result)
+    }
+    else{
+      if(sex=='both'){
+        return(results[[2]][type][[1]][,,1][year,age]+results[[2]][type][[1]][,,2][year,age]) 
+      } else{
+        return(results[[2]][type][[1]][,,sex][year,age])
+      }
+    }
+    
+    
+  }
+  
+  total_n <- sum(results[[2]]$alive)
+  
+  last_year <- baseline_year+(max_year-1)
+  
+  true_N <- results[[1]] %>% rowSums() %>% cumsum()
+  alive <- rowSums(extract_df(type = 'alive',sex='both',age='all'))
+  death <- rowSums(extract_df(type = 'death',sex='both',age='all'))
+  immi <- rowSums(extract_df(type = 'immigration',sex='both',age='all'))
+  emi <- rowSums(extract_df(type = 'emigration',sex='both',age='all'))
+  
+  # Number of population generated ------------------------------------------
+  n_generated <- cbind(Female=extract_df('alive','female',age=1)+extract_df('death','female',age=1)+extract_df("emigration","female",age=1),
+                       Male=extract_df('alive','male',age=1)+extract_df('death','male',age=1)+extract_df("emigration","male",age=1)) %>% 
+    as.data.frame() %>% 
+    mutate(year=row_number()+baseline_year-1,
+           Both=Female+Male) 
+
+  n_alive_female <- extract_df('alive','female',age='all') +
+    extract_df('death','female',age='all') + extract_df("emigration","female",age='all')
+  n_alive_male <- extract_df('alive','male',age='all')   +
+    extract_df('death','male',age='all') + extract_df("emigration","male",age='all')               
+  n_alive_both <- n_alive_female + n_alive_male
+  
+    birth_estimate <- read_csv("processed_data/master_birth_estimate.csv") %>% 
+    filter(year>= baseline_year & year <= baseline_year+nrow(n_generated)-1) %>% 
+    filter(province==chosen_province) %>% 
+    filter(projection_scenario %in% c("past",growth_type))
+  
+  pop.growth.sex <- data.frame(year=1:max_year+baseline_year-1,
+                               Male = rowSums(n_alive_male),
+                               Female = rowSums(n_alive_female),
+                               Both = rowSums(n_alive_both))
+  init <- pop.growth.sex[1,]
+  prop.growth.sex <- pop.growth.sex %>% 
+    mutate(Male=Male/init$Male,
+           Female=Female/init$Female,
+           Both=Both/init$Both) %>% 
+    pivot_longer(cols=-year,names_to='sex',values_to="prop") %>% 
+    mutate(type='Observed')
+  
+  pop_est <- read_csv("processed_data/initial_pop_distribution.csv") %>% 
+    filter(province==chosen_province) %>% 
+    filter(year >= baseline_year) %>% 
+    mutate(sex=ifelse(sex,"Male","Female"))
+  
+  pop_CA_BC <- read_rds("processed_data/pop_projection_BC_CA.rds") %>%
+    select(REF_DATE,GEO,Projection_scenario,Sex,Age_group,VALUE) %>% 
+    mutate(Projection_scenario = str_remove(Projection_scenario,"Projection scenario "),
+           Projection_scenario = str_remove(Projection_scenario, "\\:.*")) %>% 
+    filter(GEO %in% c('Canada',"British Columbia")) %>% 
+    filter(REF_DATE>=(max(pop_est$year)+1)) %>% 
+    rename(year=REF_DATE,
+           province=GEO,
+           projection_scenario = Projection_scenario,
+           sex = Sex,
+           ag = Age_group,
+           n = VALUE) %>% 
+    mutate(province = ifelse(province=="Canada","CA","BC"),
+           sex  = substr(sex,1,1),
+           age_remove = str_detect(ag,'to|over|All|Median|Average'),
+           age_keep = ag=="100 years and over") %>% 
+    filter(!age_remove | age_keep) %>%
+    mutate(age = as.numeric(gsub("([0-9]+).*$","\\1",ag)),
+           age = ifelse(is.na(age),0,age)) %>% 
+    select(year,sex,age,province,n,projection_scenario) %>% 
+    filter(sex!="B") %>% 
+    mutate(n=n*1000) %>% 
+    filter(province==chosen_province) %>% 
+    filter(!is.na(n)) %>% 
+    filter(projection_scenario == growth_type) %>% 
+    select(-projection_scenario) %>% 
+    mutate(sex=ifelse(sex=="M","Male","Female"))
+  
+  pop <- rbind(pop_est %>% 
+                 select(-total_n,-prop),
+               pop_CA_BC) %>% 
+    filter(year <= last_year)
+  
+  pop_n <- pop %>% 
+    group_by(year,sex) %>%
+    summarise(n=sum(n))
+  
+  pop_n <- pop_n %>% 
+    rbind(pop_n %>% 
+            group_by(year) %>% 
+            summarise(n=sum(n)) %>% 
+            mutate(sex="Both")) %>% 
+    arrange(year,sex)
+  
+  ratio <- pop_n$n[1]/birth_estimate$N[1]
+  
+  pop_prop <- pop_n %>% 
+    pivot_wider(names_from=sex,values_from=n)
+  
+  initial_value <- pop_prop[1,]
+  
+  pop_prop %>% 
+    mutate(Both=Both/initial_value$Both,
+           Female=Female/initial_value$Female,
+           Male=Male/initial_value$Male) %>% 
+    pivot_longer(2:4,names_to="sex",values_to="prop") %>% 
+    mutate(type='true') -> pop_prop
+  
+  comparsion <- function(chosen_year=baseline_year){
+    chosen_year_index <- chosen_year - baseline_year + 1
+    est <- n_alive_both[chosen_year_index,]
+    true <- pop %>% 
+      filter(year==chosen_year) %>% 
+      group_by(year,age) %>% 
+      summarise(n=sum(n)) %>%
+      ungroup() 
+
+    if(chosen_year==2000){
+      true <- true %>% 
+        rbind(data.frame(year=2000,age=100,n=0))
+    } 
+    
+    ratio <- true$n[1]/est[1]
+    true <- cbind(true,estimated=est[1:101]*ratio) %>% 
+      filter(age<100)
+    ggplot(data=true %>% 
+             rename(True=n,
+                    Observed=estimated) %>% 
+             pivot_longer(cols=-c(year:age),names_to='Type',values_to="prop"),
+           aes(x=age,y=prop,linetype=Type,col=Type))+
+      geom_line(linewidth=2) +
+      scale_color_manual(values=c("grey","black"),c("True","Observed"))+
+      ggtitle(chosen_year)+
+      xlab("")+
+      ylab("") +
+      xlim(c(0,18))+
+      fig_theme +
+      theme(legend.title=element_blank(),
+            legend.position ='none') +
+      theme(plot.title = element_text(hjust = 0.5))
+    
+  }
+  
+  fig.pryamid <- do.call("ggarrange", c(lapply(pop_years,function(x){comparsion(x)}), 
+                                        common.legend=T,legend='none')) %>% 
+    annotate_figure(left = textGrob("Number of Population", rot = 90, vjust = 1,
+                                    gp=gpar(fontsize=15)),
+                    bottom = textGrob("Age (year)", gp = gpar(fontsize = 15)))
+  save_plot(fig.pryamid,'pop_pyramid.png')
+  
+  
+  # asthma inc & prev -------------------------------------------------------
+  simulation_max_year <- baseline_year+max_year-1
+  
+  asthma_inc <- read_csv("processed_data/master_asthma_prev_inc.csv") %>% 
+    mutate(province=chosen_province) %>% 
+    select(year,age,province,sex,inc) %>% 
+    rename(value = inc) %>% 
+    mutate(sex = ifelse(sex==0,"F","M")) %>% 
+    mutate(observed=NA,
+           n=NA,
+           N=NA) %>% 
+    filter(year <= simulation_max_year) %>% 
+    filter( year >= baseline_year)
+  
+  asthma_prev <- read_csv("processed_data/master_asthma_prev_inc.csv") %>% 
+    mutate(province=chosen_province) %>% 
+    select(year,age,province,sex,prev) %>% 
+    rename(value = prev) %>% 
+    mutate(sex = ifelse(sex==0,"F","M")) %>% 
+    mutate(observed=NA,
+           n=NA,
+           N=NA) %>% 
+    filter(year <= simulation_max_year) %>% 
+    filter( year >= baseline_year)
+  
+  
+  for(i in 1:nrow(asthma_inc)){
+    tmp <- asthma_inc[i,]
+    tmp_age <- tmp$age+1
+    tmp_sex <- as.numeric(tmp$sex=="M")+1
+    tmp_year <- tmp$year-baseline_year +1
+    asthma_inc$n[i] <- extract_df(type = 'asthma_incidence',sex=tmp_sex,year=tmp_year,age=tmp_age)
+    asthma_prev$n[i] <- extract_df(type = 'asthma_prevalence',sex=tmp_sex,year=tmp_year,age=tmp_age)
+    asthma_inc$N[i] <- asthma_prev$N[i] <- sum(extract_df(type = 'alive',sex=tmp_sex,age=tmp_age,year=tmp_year) +
+                                                 extract_df(type = 'death',sex=tmp_sex,age=tmp_age,year=tmp_year) +
+                                                 extract_df(type = 'emigration',sex=tmp_sex,age=tmp_age,year=tmp_year))
+  }
+  
+  
+  asthma_prev <- asthma_prev %>% 
+    mutate(observed=n/N) %>% 
+    rename(true=value) %>% 
+    pivot_longer(5:6,names_to="Type") %>% 
+    mutate(CI_lower = ifelse(Type=='true',NA,value-1.96*sqrt(value*(1-value)/N)),
+           CI_upper = ifelse(Type=='true',NA,value+1.96*sqrt(value*(1-value)/N))) %>% 
+    mutate(value = value*1000,
+           CI_lower = CI_lower*1000,
+           CI_upper = CI_upper * 1000)
+  
+  asthma_inc <- asthma_inc %>% 
+    mutate(observed=n/N)%>% 
+    rename(true=value) %>% 
+    pivot_longer(5:6,names_to="Type") %>% 
+    mutate(CI_lower = ifelse(Type=='true',NA,value-1.96*sqrt(value*(1-value)/N)),
+           CI_upper = ifelse(Type=='true',NA,value+1.96*sqrt(value*(1-value)/N))) %>% 
+    mutate(value = value*1000,
+           CI_lower = CI_lower*1000,
+           CI_upper = CI_upper * 1000)
+  
+  
+  
+  # asthma_plotter <- function(chosen_year,inc=T){
+  #   
+  #   if(inc){
+  #     tmp_df <- asthma_inc
+  #     
+  #     ggplot(data=tmp_df %>% 
+  #              filter(year == chosen_year)) +
+  #       geom_line(aes(y=value,x=age,col=sex,linetype=Type,alpha=0.8),linewidth=3)+
+  #       theme_classic() +
+  #       fig_theme+
+  #       ylab("")+
+  #       ylim(c(0,100))+
+  #       xlim(c(0,65))+
+  #       theme(legend.position='none')+
+  #       ggtitle(chosen_year)+
+  #       xlab("")
+  #   } else{
+  #     tmp_df <- asthma_prev
+  #     
+  #     ggplot(data=tmp_df %>% 
+  #              filter(year == chosen_year)) +
+  #       geom_line(aes(y=value,x=age,col=sex,linetype=Type,alpha=0.9),linewidth=3)+
+  #       theme_classic() +
+  #       fig_theme+
+  #       ylab("")+
+  #       ylim(c(0,250))+
+  #       xlim(c(0,65))+
+  #       theme(legend.position='none')+
+  #       ggtitle(chosen_year)+
+  #       xlab("")
+  #   }
+  #   
+  # }
+  
+    asthma_plotter <- function(chosen_year,inc=T){
+    
+    if(inc){
+      tmp_df <- asthma_inc
+      
+      ggplot(data=tmp_df %>% 
+               filter(year == chosen_year) %>% 
+               mutate(sex = ifelse(sex=="F","Female","Male"))) +
+        geom_line(aes(y=value,x=age,col=Type,linetype=Type),linewidth=2)+
+        facet_grid(.~sex) + 
+        theme_classic() +
+        fig_theme+
+        ylab("")+
+        ylim(c(0,100))+
+        xlim(c(3,18))+
+        theme(legend.position='none')+
+        ggtitle(chosen_year)+
+        xlab('') +
+        scale_color_manual(values=c("grey","black"),c("Observed","True"))+
+        theme(text = element_text(size=15))
+    } else{
+      tmp_df <- asthma_prev
+      
+      ggplot(data=tmp_df %>% 
+               filter(year == chosen_year) %>% 
+               mutate(sex = ifelse(sex=="F","Female","Male"))) +
+        geom_line(aes(y=value,x=age,col=Type,linetype=Type),linewidth=2)+
+        facet_grid(.~sex) + 
+        theme_classic() +
+        fig_theme+
+        ylab("")+
+        ylim(c(0,250))+
+        xlim(c(3,18))+
+        theme(legend.position='none')+
+        ggtitle(chosen_year)+
+        xlab('') +
+        scale_color_manual(values=c("grey","black"),c("Observed","True")) +
+        theme(text = element_text(size=15))
+    }
+  }
+  
+  fig.asthma.inc <- do.call("ggarrange", c(lapply(pop_years,function(x){asthma_plotter(x,T)}), 
+                                           common.legend=T,legend='none')) %>% 
+    annotate_figure(left = textGrob("Asthma incidence (per 1,000)", rot = 90, vjust = 1,
+                                    gp=gpar(fontsize=15)),
+                    bottom = textGrob("Age (year)", gp = gpar(fontsize = 15)))
+  save_plot(fig.asthma.inc,'asthma_inc.png')
+  
+  fig.asthma.prev <- do.call("ggarrange", c(lapply(pop_years,function(x){asthma_plotter(x,F)}), 
+                                            common.legend=T,legend='none')) %>% 
+    annotate_figure(left = textGrob("Asthma prevalence (per 1,000)", rot = 90, vjust = 1,
+                                    gp=gpar(fontsize=15)),
+                    bottom = textGrob("Age (year)", gp = gpar(fontsize = 15)))
+  save_plot(fig.asthma.prev,'asthma_prev.png')
+  
+  
+  return(list(fig.pryamid,
+              fig.asthma.inc,
+              fig.asthma.prev))
+}
+
+val_figs <- validator(results)
+```
+
+```{r generate val plots}
+  save_plot <- function(gg_obj,nam,fig.width=10,fig.height=7,fig.dpi=600,save=save_fig){
+    if(save){
+      ggsave(paste0(fig_dir,'/',nam),gg_obj,width = fig.width,height=fig.height,dpi = fig.dpi)
+    } else{
+      "plot not saved"
+    }
+  }
+save_plot(val_figs[[1]],'pop_pyramid.png')
+save_plot(val_figs[[2]],'asthma_inc.png')
+save_plot(val_figs[[3]],'asthma_prev.png')
+```

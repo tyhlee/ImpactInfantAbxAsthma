@@ -1,0 +1,369 @@
+---
+title: "Evaluation of the what-if scenarios"
+format: html
+editor: visual
+---
+
+# 
+
+```{r import packages}
+library(JuliaCall)
+library(tidyverse)
+library(gridExtra)
+library(grid)
+library(ggpubr)
+library(colorblindr)
+options(warn=-1)
+julia_setup()
+julia_eval("pwd()")
+```
+
+```{r import results files}
+result_dir <- "../results/"
+results_files <- list.files(result_dir)
+# for each result files, get the completed ones
+lapply(results_files,function(tmp_file){
+  length(list.files(paste0(result_dir,"/",tmp_file))) == 3
+}) %>% unlist() -> completed
+
+completed_results_files <- results_files[completed]
+n <- 0.1
+N <- length(completed_results_files)
+local_multiplier <- 1/n
+global_multiplier <- 1/(n*N)
+
+source("helper_function.R")
+scenarios <- c("base", "flat", "mid")
+```
+
+```{r process results}
+# # This takes a while; results are saved for you:
+# 
+# julia_command("using JLD2")
+# julia_command("using CodecZlib")
+# 
+# processor <- function(res=completed_results_files,start_age=3,end_age=18){
+#   lapply(res,
+#                                       function(tmp_result_file) {
+# 
+#                                         tmp_results <- lapply(scenarios, function(tmp_scenario) {
+#                                           tmp_path <- paste0(result_dir, tmp_result_file, "/", tmp_scenario, ".jld")
+#                                           julia_assign("tmp_path", tmp_path)
+#                                           return(result_processor(julia_eval('JLD2.load(tmp_path)["outcome"]'),
+#                                                                   start_age = start_age,
+#                                                                   end_age = end_age,
+#                                                                   scenario =tmp_scenario))
+#                                         })
+# 
+#                                         tmp_outcomes <- lapply(tmp_results, function(res) {
+#                                           res$outcomes
+#                                         }) %>%
+#                                           do.call(rbind, .) %>%
+#                                           as.data.frame() %>%
+#                                           mutate(iter = tmp_result_file)
+# 
+#                                         tmp_abx <- lapply(tmp_results, function(res) {
+#                                           res$df_abx
+#                                         }) %>%
+#                                           do.call(rbind, .) %>%
+#                                           mutate(iter = tmp_result_file)
+# 
+#                                         tmp_inc <- lapply(tmp_results, function(res) {
+#                                           res$df_inc
+#                                         }) %>%
+#                                           do.call(rbind, .) %>%
+#                                           mutate(iter = tmp_result_file)
+# 
+#                                         tmp_prev <- lapply(tmp_results, function(res) {
+#                                           res$df_prev
+#                                         }) %>%
+#                                           do.call(rbind, .) %>%
+#                                           mutate(iter = tmp_result_file)
+# 
+#                                         tmp_exac <- lapply(tmp_results, function(res) {
+#                                           res$df_exac
+#                                         }) %>%
+#                                           do.call(rbind, .) %>%
+#                                           mutate(iter = tmp_result_file)
+# 
+#                                         return(list(
+#                                           outcomes = tmp_outcomes,
+#                                           abx = tmp_abx,
+#                                           inc = tmp_inc,
+#                                           prev = tmp_prev,
+#                                           exac = tmp_exac
+#                                         ))
+#                                       })
+# }
+# write_rds(processed_results_pediatric,"../processed_results/ped.rds")
+```
+
+```{r load processed results}
+processed_results <- read_rds("../processed_results/ped.rds")
+
+extract_outcome <- function(outcome_var){
+  lapply(processed_results,function(res){
+    res[outcome_var][[1]]
+  }) %>% 
+    do.call(rbind,.) %>% 
+  mutate(iter=as.numeric(iter)) %>% 
+  arrange(iter) %>% 
+    mutate(group_iter = (iter-1) %/% (1/n)) %>% 
+    mutate(group_iter = group_iter + 1) %>% 
+    select(-iter) %>% 
+    group_by(Year,age,scenario,group_iter) %>% 
+    summarise(value=sum(value)) %>% 
+    ungroup()
+}
+
+extract_outcomes <- function(vars){
+  tmp_res <- lapply(vars,function(x){
+    extract_outcome(x)
+  })
+  names(tmp_res) <- vars
+  tmp_res
+}
+
+outcome_list <- extract_outcomes(c("prev","inc","exac"))
+
+N <- length(completed_results_files) * n
+MC_error_multiplier <- sqrt(N/(N-1)) # more or less equal to 1, so ignore
+
+age_groups <- list(ag1=c(3:4),
+                   ag2=c(5:9),
+                   ag3=c(10:14),
+                   ag4=c(15:18),
+                   # ag2 = c(10:18),
+                   all=c(3:18))
+
+generate_tab_outcome <- function(chosen_ag=c(3:18),chosen_outcome = "prev"){
+  tmp_outcome <- outcome_list[chosen_outcome][[1]] %>% 
+    filter(age %in% chosen_ag) %>% 
+    group_by(group_iter,scenario) %>% 
+    summarise(value=sum(value))
+  
+    abs_est <- tmp_outcome %>% 
+    ungroup() %>% 
+    group_by(scenario) %>% 
+    summarise(avg=mean(value),
+              sd = sd(value))
+    
+    report_abs_est <- paste0(format(round(abs_est$avg,0),big.mark=","), 
+                             " (",
+                             format(round(abs_est$sd,0),big.mark=','),
+                             ")")
+  
+  tmp_outcome_base <- tmp_outcome %>% 
+    filter(scenario=="base") %>% 
+    rename(value_base = value) %>% 
+    select(-scenario)
+  
+  tmp_outcome_diff <- tmp_outcome %>% 
+    filter(scenario!='base') %>% 
+    left_join(tmp_outcome_base,by='group_iter') %>% 
+    mutate(diff_value = value-value_base,
+           rc = (value-value_base)/value_base*100)
+  
+  diff_est <- tmp_outcome_diff %>% 
+    group_by(scenario) %>% 
+    summarise(avg = mean(diff_value),
+              sd =sd(diff_value))
+
+  report_diff_est <- paste0(format(round(diff_est$avg,0),big.mark=","), 
+                         " (",
+                         format(round(diff_est$sd,0),big.mark=','),
+                         ")")
+  
+    rc_est <- tmp_outcome_diff %>% 
+    group_by(scenario) %>% 
+    summarise(avg = mean(rc),
+              sd =sd(rc))
+
+    report_rc_est <- paste0(format(round(rc_est$avg,2),nsmall=2,big.mark=","), 
+                       " (",
+                       format(round(rc_est$sd,2),nsmall=2,big.mark=','),
+                       ")")
+    
+    return(c(report_abs_est,report_diff_est,report_rc_est))
+}
+
+
+lapply(c("prev","inc","exac"),function(var){
+  lapply(age_groups,function(ag){
+  generate_tab_outcome(ag,var)
+}) %>% 
+  do.call(rbind,.) %>% 
+    as.data.frame() %>% 
+    mutate(type=var)
+}) %>% 
+  do.call(rbind,.)-> tab2
+
+write_csv(tab2,"../tables/tab2.csv")
+```
+
+```{r figures}
+outcome_figure_generator <- function(outcomes){
+  
+  outcomes$inc %>% 
+  group_by(Year,scenario) %>% 
+  summarise(total = sum(value)) -> gg.inc
+
+gg.inc %>% 
+  filter(scenario == "base") %>% 
+  select(-scenario) %>% 
+  rename(base = total)-> gg.inc.base
+
+gg.inc.diff <- gg.inc %>% 
+  left_join(gg.inc.base) %>% 
+  mutate(diff = total-base) %>% 
+  filter(scenario != 'base')
+
+outcomes$prev %>% 
+  group_by(Year,scenario) %>% 
+  summarise(total = sum(value)) -> gg.prev
+
+gg.prev %>% 
+  filter(scenario == "base") %>% 
+  select(-scenario) %>% 
+  rename(base = total)-> gg.prev.base
+
+gg.prev.diff <- gg.prev %>% 
+  left_join(gg.prev.base) %>% 
+  mutate(diff = total-base) %>% 
+  filter(scenario != 'base')
+
+ outcomes$exac %>% 
+  group_by(Year,scenario) %>% 
+  summarise(total = sum(value)) -> gg.exac
+
+gg.exac %>% 
+  filter(scenario == "base") %>% 
+  select(-scenario) %>% 
+  rename(base = total)-> gg.exac.base
+
+gg.exac.diff <- gg.exac %>% 
+  left_join(gg.exac.base) %>% 
+  mutate(diff = total-base) %>% 
+  filter(scenario != 'base')
+
+gg.inc.diff <- gg.inc.diff %>% 
+  mutate(scenario = ifelse(scenario=="flat","S2: Flat","S3: Mid"))
+
+gg.prev.diff <- gg.prev.diff %>% 
+  mutate(scenario = ifelse(scenario=="flat","S2: Flat","S3: Mid"))
+
+gg.exac.diff <- gg.exac.diff %>% 
+  mutate(scenario = ifelse(scenario=="flat","S2: Flat","S3: Mid"))
+
+ggplot(gg.inc.diff,aes(x=Year,y=diff,color=scenario)) + 
+  geom_line(linewidth=2) +
+  ylab("Excess asthma incident cases") -> gg1
+
+ggplot(gg.prev.diff,aes(x=Year,y=diff,color=scenario)) + 
+  geom_line(linewidth=2) +
+  ylab("Excess asthma person-years") -> gg2
+
+ggplot(gg.exac.diff,aes(x=Year,y=diff,color=scenario)) + 
+  geom_line(linewidth=2) +
+  ylab("Excess asthma exacerbations") -> gg3
+
+
+text_size <- 16
+
+gg1 +  scale_x_continuous(breaks=seq(2001,2018,by=4)) +
+  scale_color_manual(values=c("lightblue","forestgreen")) + 
+    theme_classic() +
+  guides(color=guide_legend(nrow=1,byrow=TRUE),)+
+  theme(legend.title=element_blank(),
+        legend.position = 'top',
+        text = element_text(size=text_size),
+        legend.key.width = unit(2,"cm")) -> gg1.final
+
+
+gg2 +  scale_x_continuous(breaks=seq(2001,2018,by=4)) +
+  scale_color_manual(values=c("lightblue","forestgreen")) + 
+    theme_classic() +
+  guides(color=guide_legend(nrow=1,byrow=TRUE),)+
+  theme(legend.title=element_blank(),
+        legend.position = 'top',
+        text = element_text(size=text_size),
+        legend.key.width = unit(2,"cm")) -> gg2.final
+
+gg3 +  scale_x_continuous(breaks=seq(2001,2018,by=4)) +
+  scale_color_manual(values=c("lightblue","forestgreen")) + 
+    theme_classic() +
+  guides(color=guide_legend(nrow=1,byrow=TRUE),)+
+  theme(legend.title=element_blank(),
+        legend.position = 'top',
+        text = element_text(size=text_size),
+        legend.key.width = unit(2,"cm")) -> gg3.final
+
+return(list(inc=gg1.final,prev=gg2.final,exac=gg3.final))
+}
+
+ped_fig <- outcome_figure_generator(outcome_list)
+
+fig5 <- grid.arrange(ped_fig[[2]],
+                     ped_fig[[1]]+ theme(legend.position='none'), 
+                     ped_fig[[3]]+ theme(legend.position='none'),nrow=3)
+ggsave("../figures/fig5.jpeg",fig5,width=8,height=10)
+```
+
+```{r validation with Patrick et al (2020)}
+calc_change <- function(year,sc,gi,val){
+   data.frame(Year=year[1],
+              scenario=sc[1],
+              group_iter = gi[1],
+              value = (val[2]-val[1])/val[1])
+}
+
+outcome_list[[2]] %>% 
+  filter(age %in% c(1:4)) %>% 
+  filter(Year %in% c(2001,2014)) %>% 
+  group_by(Year,scenario,group_iter) %>% 
+  summarise(value=sum(value)) %>% 
+  ungroup() %>% 
+  group_split(group_iter,scenario) %>% 
+  lapply(.,function(x){
+    calc_change(x$Year,x$scenario,x$group_iter,x$value)
+  }) %>% 
+  do.call(rbind,.) %>% 
+  group_by(scenario) %>% 
+  summarise(avg = mean(value),
+            sd = sd(value)) 
+
+```
+
+```{r decrease in inc during the study period}
+calc_change <- function(year,sc,gi,val){
+   data.frame(Year=year[1],
+              scenario=sc[1],
+              group_iter = gi[1],
+              value = (val[2]-val[1])/val[1])
+}
+
+outcome_list[[2]] %>% 
+  filter(age %in% c(1:4)) %>% 
+  filter(Year %in% c(2001,2018)) %>% 
+  group_by(Year,scenario,group_iter) %>% 
+  summarise(value=sum(value)) %>% 
+  ungroup() %>% 
+  group_split(group_iter,scenario) %>% 
+  lapply(.,function(x){
+    calc_change(x$Year,x$scenario,x$group_iter,x$value)
+  }) %>% 
+  do.call(rbind,.) %>% 
+  group_by(scenario) %>% 
+  summarise(avg = mean(value),
+            sd = sd(value)) 
+```
+
+```{r excess burden}
+(13238+18542)/37213
+(9387+680)/10053
+(16078+6788)/23280
+
+(7220+9913)/20318
+(5134+362)/5486
+(8858+3641)/12728
+```

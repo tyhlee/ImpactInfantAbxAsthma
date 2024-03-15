@@ -1,0 +1,700 @@
+---
+title: "Meta-analysis of the effect of antibiotic exposure in the first year of life
+  on childhood asthma"
+author: "Tae Yoon Lee"
+output:
+  pdf_document:
+    fig_caption: yes
+  word_document: default
+header-includes: \usepackage{float} \newcommand{\resetcounter}{ \setcounter{table}{0}
+  \setcounter{figure}{0} }
+---
+
+```{r preliminaries,echo=FALSE,cache=FALSE,message=F,include=F}
+library(tidyverse)
+library(rstan)
+library(here)
+library(knitr)
+library(kableExtra)
+library(Epi)
+library(scales)
+options(width=92,
+        show.signif.stars = FALSE)
+opts_chunk$set(comment=NA, fig.width=8, fig.height=10)
+options(mc.cores = parallel::detectCores()-2)
+rstan_options(auto_write = TRUE)
+knitr::opts_chunk$set(fig.pos = 'H')
+knitr::opts_chunk$set(fig.align = 'centre')
+knitr::opts_chunk$set(warning =  F)
+knitr::opts_chunk$set(message = F)
+knitr::opts_chunk$set(echo = F)
+select <- dplyr::select
+```
+
+# Summary 
+
+\textbf{Objective}: We sought to identify the age-specific dose-response relationship using data from a recent systematic review study (Duong et al, 2022). We hypothesized that higher numbers of courses of antibiotics in the first year of life are associated with a higher risk of developing childhood asthma and that the effect of antibiotic exposure diminishes over time.
+
+\textbf{Data}: Using the summarized data in the systematic review, we applied the following inclusion criteria to obtain high-quality studies with comparable results: 1) antibiotic exposure in the first year of life, 2) asthma diagnosis in a time window of six years or less, and 3) low risk of bias (see the Methods section for details). Figure \ref{fig:summ_flow-chart} provides the flow diagram, and the six dose-response studies are described in Table 1. 
+
+```{r flowchart,out.width="100%",fig.cap="\\label{fig:summ_flow-chart}Flow diagram for meta-analysis",echo=F}
+knitr::include_graphics(here("codes","MA","meta-analysis-flow-chart.png"))
+```
+
+\begin{table}
+
+\caption{Dose-response study characteristics}
+\centering
+\resizebox{\linewidth}{!}{
+\begin{tabular}[t]{llllllllll}
+\toprule
+Author & Country & Year & Study type & Asthma Dx timing (years) & Astham Dx basis & Sample size & Number of asthma cases & Categorization of Abx doses* & Outcome type\\
+\midrule
+Patrick & Canada & 2020 & Prospective cohort study & 5 & Study physician & 1947 & 118 & 1, 2, 3+ & OR\\
+Yoshida & Japan & 2018 & Retrospective cohort study & 1-3, 4-6 & ICD & 83470 & 3633 & 1-2, 3-4, 5+ & HR\\
+Raciborski & Poland & 2012 & Retrospective cohort study & 6-8 & Self-reported & 1330 & 63 & 1, 2, 3+ & OR\\
+Kozyrskyj & Canada & 2007 & Prospective cohort study & 7 & ICD & 13116 & 787 & 1-2, 3-4, 5+ & OR\\
+Ahn & Korea & 2005 & Retrospective cohort study & 7-12 & Self-reported & 25787 & 2354 & 1-2, 3-4, 5+ & OR\\
+Celedon & USA & 2004 & Prospective cohort study & 1-2, 2-5 & ICD & 4408 & 323 & 1-2, 3-4, 5+ & OR\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\newpage 
+
+\textbf{Assumptions}:
+\begin{itemize}
+\item We assumed that the overall OR in a short asthma diagnosis time window is roughly equal to the single-year OR in the mid-point of the window. Because a marginal OR/HR is not necessarily equal to the average of conditional OR/HR over a variable (e.g., time), for our meta-analysis, we required a single time point of asthma diagnosis due to limited summary statistics provided in the studies. 
+\item On other other hand, for antibiotic exposure, we could not find any plausible approximation method. As such, we selected the single time point that the majority of the studies use, which was the first year of life.
+\item We treated HRs in the Yoshida study as ORs. While ORs and HRs are fundamentally different quantities, they are approximately equal when the prevalence is low (for proportional hazard distributions). Yoshida et al (2018) uses the Cox proportional hazard model, and the asthma prevalence is less or equal to 6\% across different dose levels.
+\item Among the six dose-response studies, two classify the number of courses of antibiotics as 0, 1, 2, 3 or more, and four classify doses as 0, 1-2, 3-4, and 5+. To facilitate the evidence synthesis, we used the following modifications as an approximation: 3 or more => 4, 1-2 => 1, 3-4 => 3, and 5+ => 5.
+\item We assumed that the dose effect is proportional on the log-scale (i.e., double the dose, double the effect on childhood asthma development on the log-scale).
+\end{itemize}
+
+\textbf{Model:} We fitted a random-effects meta-regression model in a fully Bayesian framework using Stan (with non-informative priors):
+\begin{align*}
+\log(aOR_i(age,dose)) &\sim N(\beta_0 + \beta_1*age + \beta_2*dose + u_i,\sigma_i^2)
+\end{align*}
+where $u_i \sim N(0,\sigma_u^2)$ are the between-study random-effects, and we used the standard error of $\log(aOR_i))$ reported in the studies as if it were true value of $\sigma_i$. If our hypothesis were true, $\beta_1$ would be negative (diminishing effect) and $\beta_2$ would be positive (detrimental dosage effect). Details on the priors and implementation are provided on page 8 (``Bayesian random-effects meta-regression modeling''). 
+
+\textbf{Results}: The estimates of $\beta_1$ and $\beta_2$ were in accordance with our expectation (Table 2). We predicted the dose-response effect for each age up to 7 years of age for Canada by using the empirical Bayes estimate of the random effects of the Canadian study ($\beta_{Canada}=0.12,$ 95% CI= $(-0.69,1.06)$; Patrick et al., 2020; Figure 2). Prediction beyond 7 years of age was extrapolation, and it appeared the effect would almost disappear by 8 years of age. 
+
+```{r, include=F}
+# library(kableExtra)
+# kbl(read_rds("dose_tab_sensitivity.rds")  %>%
+#         select(1,4) %>%
+#         rename(`95\\% credible intervals`=CI),
+#       caption="Parameter estimates for the dose-response model.",
+#       format='latex',booktabs = T,escape=F) %>% 
+#   kable_styling(latex_options = 'striped')
+```
+\begin{table}[H]
+\caption{Parameter estimates for the dose-response model.}
+\centering
+\begin{tabular}[t]{lrl}
+\toprule
+  & Estimate & 95\% credible intervals\\
+\midrule
+\cellcolor{gray!6}{$\beta_0$} & \cellcolor{gray!6}{1.711} & \cellcolor{gray!6}{(0.769, 2.536)}\\
+$\beta_1$ & $-0.225$ & $(-0.256, -0.195)$\\
+\cellcolor{gray!6}{$\beta_2$} & \cellcolor{gray!6}{0.053} & \cellcolor{gray!6}{(0.034, 0.072)}\\
+$\sigma_u$ & 0.930 & (0.481, 1.994)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+```{r,fig.cap="Estimated age-specific dose-response relationships for Canada. The red line indicates the adjusted odds ratio of 1 (no effect)."}
+knitr::include_graphics("figures/MA.jpeg")
+```
+
+\newpage 
+\resetcounter
+
+# Introduction
+
+A recent systematic review identified 63 relevant studies that investigated the association between antibiotic exposure and the risk of developing asthma among children (Duong et al, Journal of Infection, 2022). For the meta-analysis, they found that 51 studies (81%) provided sufficient data and examined the binary exposure case of no antibiotic exposure versus exposure to at least one course of antibiotics. They used a classic random-effects meta-analysis model and concluded that antibiotic exposure was associated with an increase risk of developing childhood asthma with an odds ratio (OR) of 1.96 (95% CI: 1.76-2.17; Figure \ref{fig:doung}).
+
+```{r img,out.width="100%",fig.cap="\\label{fig:doung}Meta-analysis results from Doung et al, 2022.",echo=F}
+knitr::include_graphics("MA/combined_asthma.jpeg")
+```
+
+However, we are concerned that their results may be potentially at high risk of bias (RoB). Doung et al did not consider the quality of studies in their meta-analysis when they assessed the risk of bias across the seven domains (confounding, selection, misclassification, performance, attrition, detection, and reporting) for each study. It is well-known that observational studies are at risk of confounding. In particular, reverse causation or confounding by indication is a major concern. For instance, Patrick et al (2020; one of the included studies) found the effect of antibiotic exposure to be slightly attenuated after accounting for both reverse causation and confounding by indication.
+
+Further, we are concerned whether their results yield practical clinical implications due to delicate nuances, such as exposure and outcome timings, in the research designs. Results across the included studies may not be comparable due to substantial variability in timings for antibiotic exposure and diagnosis of asthma. For instance, Chen et al (2018) looked at the antibiotic exposure in the first five years of life and asthma diagnosis between 2-18 years of age, whereas Zou et al (2020) looked at the antibiotic exposure in the first year of life and asthma diagnosis between 4-6 years of age. 
+
+# Objectives
+
+Our primary goal is to obtain an estimate of the age-specific dose-response of the number of courses of antibiotics in the first year of life on childhood asthma (up to 7 years of age). We hypothesize that higher numbers of courses of antibiotics are associated with a higher risk of childhood asthma and that the effect of antibiotic exposure diminishes over time. 
+
+# Methods and Results
+
+```{r load the data,echo=F,results=F,message=F,warning=F}
+dx_numeric <- function(dx){
+  tmp <- str_remove(dx," y")
+  if(str_detect(tmp,"-")){
+    mean(as.numeric(str_split(tmp,"-")[[1]]))
+  } else{
+    as.numeric(tmp)
+  }
+}
+
+maximum_dose <- 5
+maximum_window_length <- 6
+
+df_Master <- openxlsx::read.xlsx("MA/asthma_SR_summary.xlsx",sheet=2)
+
+df_Master %>% 
+  filter(RoB=="low") %>% 
+  filter(AbxExposure=="< 1 y") %>% 
+  mutate(AbxDx_is_range = str_detect(AsthmaDx,"-")) %>% 
+  rowwise() %>% 
+  mutate(AbxDx_range = ifelse(str_detect(AsthmaDx,"-"),
+                              abs(diff(parse_number(str_split(AsthmaDx,"-")[[1]])))+1,
+                              parse_number(AsthmaDx))) %>% 
+  filter(!(AbxDx_is_range) | (AbxDx_is_range & AbxDx_range <= maximum_window_length) ) %>% 
+  ungroup() ->  df_master
+```
+
+
+## Data source
+We used the summarized data from the recent systematic review by Duong et al (2022). 
+
+### Potential risk of bias (RoB)
+We addressed the potential RoB in two ways. First, instead of using crude ORs, we utilized adjusted odds ratios (aOR). Second, we excluded the studies with potential RoB using the risk assessment by Duong et al (2022). We followed the guidelines by the Agency for Healthcare Research and Quality to calculate the overall RoB by setting the initial overall level of RoB to 1 and decreasing/increasing the level by one by each domain if the domain-specific risk is low/otherwise (Viswanathan et al, 2017). Finally, the overall RoB levels of $\leq 1$, 2-3, and $\geq 4$ are classified as ‘low’ (n=50; 79%), ‘medium’ (n=12; 19%), and ‘high’ (n=1; 2%), respectively. 
+
+We excluded the studies whose overall RoB levels were ‘medium’ or ‘high’: Neto et al(2020), Zou et al (2020), Norback et al (2019), Soto-Martinez et al (2019), Stromberg et al (2018), Ahmadizar et al (2017), Eldeirawi et al (2015), Lapin et al (2014), Karimi et al (2009), Martel et al (2009), Wjst et al (2001), Droste et al (2000), and Wickens et al (1999).
+
+### Comparable outcomes
+To obtain interpretable and clinically applicable results, we included studies that examine the antibiotic exposure in the first year of life (n=37 ; 59\%) and asthma diagnosis in a time window of 6 years or less (n=49; 78\%). Applying all the inclusion criteria leads to a subset of 23 studies. Only six of them reported on the dose-response relationship.
+
+### Rationales for inclusion criteria
+
+#### Single-time point approximation 
+
+It is well known that a marginal OR/HR is not necessarily equal to the average of conditional OR/HR over a variable (e.g., time). This implies that it is difficult to obtain the age-specific OR based on the overall OR over a time window. Moreover, for our meta-analysis, we would require a single point (in years) of antibiotic exposure and asthma diagnosis. Due to limited summary statistics provided in the studies, we have to make approximations. For asthma diagnosis, we assume that the overall OR in a short time window ($\leq 6$years) is roughly equal to the single-year OR in the mid-point of the window. Based on a small simulation study (see the appendix), this midpoint approximation appears defensible. On other other hand, for antibiotic exposure, we don't have any plausible approximation method. As such, we selected the single time point that the majority of the studies use, which is the first year of life.
+
+#### Odds ratio versus hazards ratio 
+
+Most of the studies report their effects in ORs (90\%). While ORs and HRs are fundamentally different quantities, they are approximately equal when the prevalence is low (for proportional hazard distributions). The prevalence might vary across time and might not be low for a population with a high level of antibiotic exposure. We treat HRs as ORs only if a proportional hazard distribution is used and the prevalence is less than 5\% or so.
+
+There are two studies that report their outcomes in HRs. Yoshida et al (2018) uses the Cox proportional hazard model, and the prevalence is less or equal to 6\% across different dose levels. Wang et al (2013) also uses the Cox proportional hazard model, and the prevalence is 6\%-10\% depending on the age groups. Although the prevalence in the Wang study is slightly higher than the desired level, we include both the Yoshida and Wang studies in our meta analysis.
+
+```{r flow chart main, echo=F, message=F, warning=F, out.width="100%",out.height="50%",fig.cap="\\label{fig:venn}Flow diagram for meta-analysis.",fig.align='center',include=F}
+# library(ggvenn)
+# library(ggVennDiagram)
+# df_Venn <- df_Master %>%
+#   mutate(studyid=row_number())
+# 
+# tmp <- df_Venn %>%
+#   distinct(Author,PublicationYear,.keep_all=T) %>%
+#   select(studyid) %>%
+#   unlist()
+# 
+# n_dose <- df_Venn %>%
+#   filter(DoseResponse =="Y")%>%
+#   distinct(Author,PublicationYear,.keep_all = T)
+# 
+# n_low <- df_Venn %>%
+#   filter(RoB=="low")%>%
+#   distinct(Author,PublicationYear,.keep_all = T)
+# 
+# n_fy <- df_Venn %>%
+#   filter(AbxExposure=="< 1 y") %>%
+#   distinct(Author,PublicationYear,.keep_all = T)
+# 
+# n_range <- df_Venn %>%
+#     rowwise() %>%
+#   mutate(AbxDx_is_range = str_detect(AsthmaDx,"-")) %>%
+#   mutate(AbxDx_range = ifelse(str_detect(AsthmaDx,"-"),
+#                               abs(diff(parse_number(str_split(AsthmaDx,"-")[[1]])))+1,
+#                               parse_number(AsthmaDx))) %>%
+#   ungroup() %>%
+#   filter(!(AbxDx_is_range) | (AbxDx_is_range & AbxDx_range <= maximum_window_length) ) %>%
+#   distinct(Author,PublicationYear,.keep_all = T)
+# 
+# gg_ven <- list(low=n_low$studyid,
+#                first_year = n_fy$studyid,
+#                range = n_range$studyid)
+# names(gg_ven) <- c("Low RoB",
+#                    "Abx exp in the first year of life",
+#                    "Time window of length <= 6 years for asthma Dx")
+# 
+# ggvenn(gg_ven,
+#        text_size=5)
+knitr::include_graphics("MA/meta-analysis-flow-chart.png")
+```
+
+```{r dose-response studies}
+dose_response <- df_master %>% 
+  filter(Author %in% c("Patrick","Yoshida","Raciborski","Kozyrskyj","Celedon","Ahn")) %>% 
+  filter(PublicationYear>2002) %>% 
+  select(1,2,3,4,6,8,9,type_effect)  %>% 
+  distinct(Author,.keep_all = T) %>% 
+  mutate(StudyType = ifelse(StudyType=="PCS","Prospective cohort study",
+                            "Retrospective cohort study"),
+         AsthmaDx=str_remove(AsthmaDx," y"))
+  
+
+dose_response$AsthmaDx[2] <- c("1-3, 4-6")
+dose_response$AsthmaDx[6] <- c("1-2, 2-5")
+dose_response$doses <- c("1, 2, 3+",
+                         "1-2, 3-4, 5+",
+                         "1, 2, 3+",
+                         "1-2, 3-4, 5+",
+                         "1-2, 3-4, 5+",
+                         "1-2, 3-4, 5+")
+dose_response <- dose_response %>% 
+  mutate(`Astham Dx basis`= c("Study physician","ICD","Self-reported","ICD","Self-reported","ICD")) %>% 
+  select(1:5,`Astham Dx basis`,N,N_asthma,doses,8:9) %>% 
+  rename(`Year` = PublicationYear,
+         `Asthma Dx timing (years)` = AsthmaDx,
+         `Study type` = StudyType,
+         `Sample size` = N,
+         `Number of asthma cases` = N_asthma,
+         `Outcome type` = type_effect,
+         `Categorization of Abx doses*`=doses)
+
+# physician, ICD code, questionare, code based from the admin data (ICD + prescription), ICD code
+# write_rds(dose_response,"dose_response_table_sensitivity.rds")
+kable(dose_response,caption="Dose-response study characteristics") %>%  
+  kable_styling(latex_options = "scale_down" ) %>% 
+  add_footnote(.,c("Number of courses of antibiotics"),notation="symbol")
+```
+
+#### Approximation of the number of courses of antibiotics
+
+We face yet another issue with the data. Among the six dose-response studies (Table 1), two classify the number of courses of antibiotics as 0, 1, 2, 3 or more, and four classify doses as 0, 1-2, 3-4, and 5+. To facilitate the evidence synthesis, we use the following modifications as an approximation: 3 or more => 4, 1-2 => 1, 3-4 => 3, and 5+ => 5.
+
+## Bayesian random-effects meta-regression modeling
+
+For the dose-response relationship, we assume that the dose effect is proportional on the log-scale (i.e., double the dose, double the effect on childhood asthma on the log-scale). We make another simplifying assumption on the covariance structure of the within-study dose-response estimates that within-study estimates are independent given the random effects. This is unlikely true in reality, but we do not have access to the estimate of the covariance matrix of the dose-response parameters from the studies. 
+
+The random-effects meta regression model for the proportional dose-response relationship is as follows:
+
+\begin{align*}
+\log(aOR_i(age,dose)) &\sim N(\theta_i(age,dose),\sigma_i^2)\\
+\theta_i(age,dose) &= \beta_0 + \beta_1 * age + \beta_2*dose + u_i \\
+\beta_0,\beta_1, \beta_2 &\sim N(\textbf{0},\Sigma)\\
+\Sigma &= V (L* L^T ) V ~ (\mbox{Cholesky factorization})\\
+u_i &\sim N(0,\sigma_u^2)\\
+\mbox{Specification of priors:}&\\
+\sigma_u &\sim LN(0,10^2)\\
+V_{ii}& \sim Cauchy(0,5) \mbox{ for $i=1,2,3$}\\
+L & \sim \mbox{LKJ\_corr\_cholesky}(1.0) \mbox{ (see Lewandowski, Kurowicka, and Joe (2009))}\\
+\end{align*}
+
+If our hypothesis on the detrimental dosage effect holds, the value of $\beta_2$ will be positive. Ideally, if we had an estimate of the covariance matrix of the dose-response parameter estimates from the individual studies, $\Sigma_i$, we would incorporate these into our meta-regression model:
+$$
+\log(aOR_i(age)) \sim N(\mathbf{\theta}_i(age), \Sigma_i),
+$$
+where $\log(aOR_i(age))$ is a vector of the aOR for the five dose levels (1, 2, 3, 4, 5) for sutdy $i$, and $\mathbf{\theta}_i(age)$ is the corresponding vector of $\theta_i(age,dose)$.
+
+
+### Implementation
+
+We use Stan to fit the models (refer to Stan codes in the appendix for details). Using relatively flat priors as specified in the model description, we use 10 chains, each with 10,000 iterations, thinning of 5, and burn-in of 5,000 for the dose-response model, respectively.
+
+### Fitted and predicted values
+
+It is easy to obtain fitted values (conditional on the posterior of the study-specific random effects) as well as mean prediction values (unconditional on the random effects) in the Bayesian framework using the generated quantities block in Stan. Note that obtaining a predictive distribution for a \textit{future study} is not straightforward (because we do not have $\sigma_i$ for the future study). While the literature is rich on this topic, no reliable Bayesian method has yet been implemented in R.
+
+## Results
+
+```{r stan data setup,echo=F,message=F,warning=F}
+df <- df_master %>% 
+  filter(DoseResponse=="Y") %>% 
+  filter(str_detect(type_effect,"OR")| Author=='Yoshida') %>% 
+  mutate(studyid = row_number()) %>% 
+  mutate(studyid=paste0(Author,PublicationYear)) %>% 
+  mutate(studyid=as.factor(studyid)) %>% 
+  select(1,2,3,Author,5,6,aOR1:aOR5,studyid,max_dose) %>% 
+  mutate(AbxExposure_coded = case_when(AbxExposure == "< 1 y" ~ 1,
+                                 AbxExposure == "< 2 y" ~ 2,
+                                 AbxExposure == "1-3 y" ~ 2,
+                                 TRUE ~ 0.5))
+df$studyid = factor(df$studyid,levels = unique(df$studyid),labels=c(1:length( unique(df$studyid))))
+df$AsthmaDx_coded <- lapply(df$AsthmaDx,dx_numeric) %>% unlist()
+
+df %>% 
+  pivot_longer(cols=aOR1:aOR5,names_to='dose',values_to='aOR') %>% 
+    select(studyid,Author,PublicationYear,AbxExposure,AbxExposure_coded,AsthmaDx,AsthmaDx_coded,
+         max_dose,dose,aOR) %>% 
+  filter(!is.na(aOR)) %>% 
+  mutate(dose = str_remove(dose,"aOR")) -> df
+
+df$dose_coded <- ""
+df$dose_explained <- ""
+for(i in 1:nrow(df)){
+  df$dose_coded[i] <-  ifelse(df$dose[i] == '12', 1,
+                              ifelse(df$dose[i]=='34',3,
+                                     ifelse(df$max_dose[i]==df$dose[i],
+                             floor(mean(df$max_dose[i]:maximum_dose)),df$dose[i])))
+  df$dose_explained[i] <- ifelse(df$dose[i]==df$max_dose[i],
+                                 paste0(df$dose[i],"+",collapse=''),
+                                 df$dose[i])
+}
+df$dose_coded[which(df$dose_coded=="4")] <- "5"
+
+df <- df %>% 
+  mutate(dose1 = as.numeric(str_detect(dose_coded,'1')),
+         dose2 = as.numeric(str_detect(dose_coded,'2')),
+         dose3 = as.numeric(str_detect(dose_coded,'3')),
+         dose4 = as.numeric(str_detect(dose_coded,'4')),
+         dose5 = as.numeric(str_detect(dose_coded,'5')))
+x_test <- expand.grid(t=1:8,dose=1:5)
+df_stan <- with(df,
+                list(studyid=studyid %>% as.numeric(),
+                     age = AbxExposure_coded,
+                     t = AsthmaDx_coded,
+                     aOR = aOR,
+                     dose = dose_coded %>% as.numeric(),
+                     dose1 = dose1,
+                     dose2 = dose2,
+                     dose3 = dose3,
+                     dose4 = dose4,
+                     dose5 = dose5,
+                     N = nrow(df),
+                     J = length(unique(studyid)),
+                     K= 5,
+                     N_test=nrow(x_test),
+                     x_test=x_test))
+df_stan$aOR_se <- str_match_all(df_stan$aOR, "(?<=\\().+?(?=\\))") %>% 
+  unlist() %>% 
+  lapply(.,function(x){
+    tmp <- str_split(x,'-')[[1]] %>% 
+      as.numeric()
+    mean(tmp)/2
+  }) %>% 
+  unlist()
+
+df_stan$aOR_se <- df_stan$aOR_se/qnorm(0.975)
+df_stan$aOR <- gsub(r"{\s*\([^\)]+\)}","",as.character(df_stan$aOR)) %>% 
+  as.numeric()
+
+df_stan$log_aOR <- log(df_stan$aOR)
+df_stan$log_aOR_se <- (df_stan$aOR_se^2)/df_stan$aOR^2
+```
+
+
+```{r fit full model,echo=F,message=F,warning=F}              
+df_stan$K <- 3
+# AbxMAFit <- stan(file = "MA/abx_ma.stan",
+#                  data = df_stan,
+#                  iter = 10000, chains = 10,
+#                  thin=5,
+#                  control = list(max_treedepth = 20,adapt_delta=.90))
+# save(list="AbxMAFit",file="AbxMAFit.Rda",
+#      compress="xz")
+load("MA/AbxMAFit.Rda")
+```
+
+Table 3 provides the parameter estimates for the dose-response meta-regression model. The estimates of $\beta_1$ and $\beta_2$ are in alignment with our hypothesis: decaying effect over time and greater potency with doses. Heterogeneity between studies is estimated to be greater in the dose-response model.
+
+```{r dose comparison estimates,echo=F,message=F,warning=F}
+# ,fig.cap="\\label{fig:dose_param}Parameter estimates of the dose-response model by the Frequentist (orange) and Bayeisan (grey) methods.",out.width="50%",out.height="50%",fig.align='center'
+df  %>% 
+  distinct(Author,PublicationYear) %>%  
+  mutate(studyid = paste0(Author,', ',PublicationYear)) %>% 
+  select(studyid) %>% 
+  unlist() -> ids
+
+# parameter estimates
+dose_stan_summ <- summary(AbxMAFit,digits=3)$summary
+dose_stan_coef <- dose_stan_summ[c(1,2,3,10),c(1,4,8)]
+
+# coef_table_generator <- function(binary_RE){
+#   look <- summary(binary_RE)
+#   fe <- cbind(look$beta,look$ci.lb,look$ci.ub)
+#   re <- ranef(binary_RE)[[1]][,c(1,3,4)]
+#   rbind(fe,re %>% as.matrix(),confint(look)$random[2,])
+# }
+# dose_fe_coef <- coef_table_generator(dose_RE)
+
+# tmp <- dose_stan_coef[1,]
+# dose_stan_coef[1,] <- dose_stan_coef[2,]
+# dose_stan_coef[2,] <- tmp
+
+# rownames(dose_fe_coef) <- c("Intercept","z","beta",ids,"sigma")
+rownames(dose_stan_coef) <- c("Intercept","z","beta_1",'sigma')
+
+# plotEst(dose_stan_coef %>% as.matrix(),col=alpha('black',0.7))
+# linesEst(dose_fe_coef, pch = 16, cex = 1, lwd = 1,lty='dashed',
+#           col=alpha("orange",0.7))
+# abline(v=0,lty='dashed')
+
+dose.tab <- round(dose_stan_coef,3) %>% as.data.frame()
+dose.tab$CI <- paste0("(",dose.tab[,2],", " ,dose.tab[,3],")")
+
+rownames(dose.tab) <- c("$\\beta_0$","$\\beta_1$","$\\beta_2$","$\\sigma_u$")
+colnames(dose.tab)[1] <- "Estimate"
+# write_rds(dose.tab,"dose_tab_sensitivity.rds")
+# library(kableExtra)
+# kbl(dose.tab %>%
+#         select(1,4) %>%
+#         rename(`95\\% credible intervals`=CI),
+#       caption="Parameter estimates for the dose-response model.",
+#       format='latex',booktabs = T,escape=F) %>%
+#   kable_styling(latex_options = 'striped') %>%
+#     kable_styling(latex_options = "HOLD_position")
+```
+
+\begin{table}[H]
+\caption{Parameter estimates for the dose-response model.}
+\centering
+\begin{tabular}[t]{lrl}
+\toprule
+  & Estimate & 95\% credible intervals\\
+\midrule
+\cellcolor{gray!6}{$\beta_0$} & \cellcolor{gray!6}{1.711} & \cellcolor{gray!6}{(0.769, 2.536)}\\
+$\beta_1$ & $-0.225$ & $(-0.256, -0.195)$\\
+\cellcolor{gray!6}{$\beta_2$} & \cellcolor{gray!6}{0.053} & \cellcolor{gray!6}{(0.034, 0.072)}\\
+$\sigma_u$ & 0.930 & (0.481, 1.994)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+### Fitted values
+
+We see substantial shrinkage as indicated by poor overlap between the credible (fitted) and confidence (actual) intervals (Figure \ref{fig:dose_fv}). This may driven by a mix of non-linear and linear dosage effects observed among the studies (on the log scale) or inadequate approximation of the number of courses of antibiotics. In general, for the studies that exhibited log-linear dosage effects (e.g., the Raciborski study and Patrick study), the effects of higher numbers of courses of antibiotics are estimated lower than the observed values. Hence, our model should be used with caution and might not be suitable for real-world applications without further procurement of studies. 
+
+```{r dose Bayesian observed vs pred,echo=F,message=F,warning=F,fig.cap="\\label{fig:dose_fv}Study-specific observed (black) and fitted (grey) adjusted odds ratio along with 95\\% confidence and credible intervals, respectively, for the dose-response relationship.",out.width="70%",out.height="70%",fig.align='center'}
+df  %>% mutate(studyid = paste0(Author,', ',PublicationYear,', dose: ',dose_explained, ' asthma Dx: ' ,str_remove(AsthmaDx," y"))) %>%
+  select(studyid) %>% unlist() -> ids
+df_meta <- as.data.frame(do.call(cbind,df_stan[c(1,2,3,4,5,16:18)]))
+
+df_meta %>% 
+  mutate(ulb = exp(log_aOR-qnorm(0.975)*log_aOR_se),
+         ub =exp(log_aOR+qnorm(0.975)*log_aOR_se)) %>% 
+  select(aOR,ulb,ub) -> dose_actual
+
+dose_stan_summ <- summary(AbxMAFit,digits=3)$summary
+dose_pred <- exp(dose_stan_summ[str_detect(rownames(dose_stan_summ),"y_pred"),c(1,4,8)])
+
+plotEst(dose_actual %>% as.matrix(),col=alpha('black'),txt = as.vector(ids),xlab = "Adjusted Odds Ratio")
+linesEst( dose_pred, pch = 16, cex = 1, lwd = 2,
+          col=alpha("grey",0.99))
+# linesEst( predict(dose_RE,transf = exp) %>% as.data.frame() %>% select(1:3), pch = 16, cex = 1, lwd = 2,
+#           col=alpha("orange",0.7))
+abline(v=1,lty='dashed')
+```
+
+# Main results
+We estimate the dose-response relationship between antibiotic exposure in the first year of life and the risk of developing childhood asthma up to age 7 for BC by conditioning on the empirical Bayes estimate of the random effects of the Canadian study (Patrick et al, 2020; Figure \ref{fig:patrick}). 
+
+```{r dose comparison prediction,echo=F,message=F,warning=F,out.width="70%",out.height="70%",fig.cap="\\label{fig:patrick}Estimated age-specific dose-response relationships for British Columbia. The red line indicates the adjusted odds ratio of 1 (no effect)",fig.align='center'}
+# dose_freq_pred <- predict(dose_RE,newmods=x_test %>% as.matrix(),intercept = 5) %>% 
+#   as.data.frame() %>% 
+#   select(1,3,4)
+tmp <- data.frame(AsthmaDxAge=x_test$t,
+                      Dose = x_test$dose)
+# tmp1 <- cbind(tmp,exp(dose_freq_pred))
+# colnames(tmp1)[3:5] <- c("mean","lb","ub")
+
+dose_stan_pred <- dose_stan_summ[str_detect(rownames(dose_stan_summ),"y_patrick"),c(1,4,8)]
+tmp2 <- cbind(tmp,exp(dose_stan_pred))
+colnames(tmp2)[3:5] <- c("mean","lb","ub")
+
+ggplot(data=tmp2 %>% 
+         filter(AsthmaDxAge<=7 & AsthmaDxAge>2) %>% 
+         mutate(AsthmaDxAge=rep(paste0(3:7, " years of age"),5)),
+       aes(y=mean,x=Dose))+
+  geom_point(size=3) +
+  geom_errorbar(aes(ymin=lb,ymax=ub),alpha=0.5)+
+  # geom_hline(aes(yintercept=1,colour="red"))+
+  facet_grid(.~AsthmaDxAge) +
+  theme(legend.position = 'none')+
+  ylab("Adjusted odds ratio") +
+  theme_minimal()+
+  theme(text=element_text(size=20)) +
+     theme(panel.background = element_rect(fill = NA, color = "black",size=2))+
+  xlab("Number of infant antibiotic prescriptions") -> gg.patrick
+# write_rds(gg.patrick,"plot_dose_relationship_sensitivity.rds")
+gg.patrick
+# write_rds(tmp2,"MA/Canada_MA_model_output.rds")
+ggsave("../figures/fig3.jpeg",dpi=600,width=12,height=13)
+```
+
+# Sensitivity analysis
+
+```{r sensitivity}
+df %>% 
+  select(studyid,Author) %>% 
+  mutate(adj_rev_causation = as.numeric(Author %in% c("Patrick","Kozyrskyj"))) %>% 
+  select(adj_rev_causation) %>% unlist() %>% as.vector() -> adj_rev_causation
+df_stan_sensitivity <- df_stan
+df_stan_sensitivity$adj_rev_causation <- adj_rev_causation
+df_stan_sensitivity$K <- 4
+AbxMAFit_sensitivity <- stan(file = "MA/abx_ma_sensitivity.stan",
+                 data = df_stan_sensitivity,
+                 iter = 10000, chains = 10,
+                 thin=5,
+                 control = list(max_treedepth = 20,adapt_delta=.95))
+save(list="AbxMAFit_sensitivity",file="MA/AbxMAFit_sensitivity.Rda",
+     compress="xz")
+load("MA/AbxMAFit_sensitivity.Rda")
+
+```
+
+# Appendix
+
+## Simulation study
+We investigate whether our single-time midpoint approximation to a short time window of asthma diagnosis is plausible. We examine the binary exposure case (exposure: 0 or 1) in the first year with a simple data generating mechanism. The probability of being diagnosed with asthma for a given age and exposure is provided by the following equation:
+\[
+logit(p_{age,exposure}) = \beta_0 + \beta_1*age + \beta_2*exposure + \beta_3*exposure*age.
+\]
+We set the parameter values such that the probability decays over time and the effect of antibiotic exposure in the first year diminishes completely at age 10 (Figure \ref{fig:pp}). With $n=100,000$ individuals and the maximum age to be 10 years, consider three time window sizes of 3 (e.g., 5-7 years of age), 5 (e.g., 1-5 years of age), and 7 (4-10 years of age) in years. Simulation results are summarized in Tables 4 and 5, and the midpoint approximation (i.e., age-specific OR in the midpoint year) seems to be close to the overall OR (over the time window).
+
+
+```{r}
+asthma_hazard <- function(age,exp){
+  baseline_hazard <- function(t){
+    log(t)
+  }
+  log(baseline_hazard(age))
+}
+
+library(survival)
+
+test1 <- list(time=c(4,3,1,1,2,2,3), 
+              status=c(1,1,1,1,1,1,1), 
+              x=c(0,2,1,1,1,0,0), 
+              sex=c(0,0,0,0,1,1,1)) 
+
+# Fit a stratified model 
+m1 <- coxph(Surv(time, status) ~ x + sex, test1) 
+
+max_time <- 10
+beta.mat <- data.frame(beta2 = seq(-0.01,by=-0.01,length.out=max_time),
+                       beta3 = 0.8,
+                       beta4 = seq(-0.08,by=-0.08,length.out=max_time))
+library(coxed)
+simdata <- sim.survdata(N=1000, T=max_time, type="tvbeta", beta=beta.mat, num.data.frames = 1)
+
+```
+
+```{r simulation study set-up,echo=F,fig.cap="\\label{fig:pp}Probability of getting asthma at each age over the binary exposure case in the first year of life for the simulation study.",out.width="50%",out.height="70%",fig.align='center'}
+# logit(p) = b0 + b1*age + b2*exp + b3*exp*age 
+# num of patients
+set.seed(2022)
+n <- 1000000
+p_generator <- function(age,exp){
+  boot::inv.logit(b0+b1*age+b2*exp+b3*exp*age)
+}
+
+b0 <- -3.5
+b1 <- -0.01
+b2 <- 0.8
+b3 <- -0.08
+exp_prev <- 0.4
+max_time <- 10
+
+pp <- c(p_generator(1:10,0),p_generator(1:10,1))
+pp <- cbind(pp,rep(1:10,2),c(rep(0,10),rep(1,10))) %>% 
+  data.frame()
+colnames(pp) <- c("Probability","Age","Antibiotic exposure")
+pp$`Antibiotic exposure` = as.factor(pp$`Antibiotic exposure`)
+ggplot(data=pp %>% 
+         mutate(`Antibiotic exposure` = ifelse(`Antibiotic exposure`==0,"No exposure"," Exposure")),aes(x=Age,y=Probability,color=`Antibiotic exposure`))+
+  geom_line()+
+  theme_classic()+
+  theme(text = element_text(size=25),
+        legend.title = element_blank())+
+  ylab("Probability of having asthma") + 
+  xlab("Age (years)")
+  theme(legend.position = 'top') -> gg_sim
+  gg_sim
+ggsave(device = "jpg",filename="../figures/SM_fig1.jpeg",dpi=600,height=10,width=10)
+```
+
+```{r, sim results, echo=F }
+# sim_results <- matrix(0,nrow=5,ncol=max_time)
+# sim_exposed <- rep(0,n)
+# 
+# for(i in 1:n){
+# 
+#   tmp_age <- sample(1:max_time,1)
+#   tmp_exp <- rbernoulli(1,exp_prev)
+#   sim_results[1,tmp_age] <- sim_results[1,tmp_age]+1
+#   sim_results[tmp_exp+2,tmp_age] <- sim_results[tmp_exp+2,tmp_age]+1
+#   sim_results[tmp_exp+4,tmp_age] <- sim_results[tmp_exp+4,tmp_age] + rbernoulli(1,p=p_generator(tmp_age,tmp_exp))
+# 
+#   # while(tmp_age < max_time){
+#   #   tmp_age <- tmp_age + 1
+#   #   tmp_asthma <- rbernoulli(1,p=p_generator(tmp_age,tmp_exp))
+#   #   sim_results[i,tmp_age] <- tmp_asthma
+#   # for(i in 1:t){
+#   #   tmp_age <- tmp_age + 1
+#   #   tmp_asthma <- rbernoulli(1,p=p_generator(tmp_age,tmp_exp))
+#   #   if(tmp_asthma){
+#   #     sim_results[i,t:max_time] <- 1
+#   #     break
+#   #   }
+#   # }
+# }
+# write_rds(sim_results,"sim_results.rds")
+sim_results <- read_rds("MA/sim_results.rds")
+
+supp_tab2 <- t(sim_results) %>% 
+  as.data.frame()
+# EXposure / asthma
+colnames(supp_tab2) <- c("Sample size","No/No", "Yes/No", "N/Y", "Y/Y")
+# write_csv(supp_tab2,"supp_tab2.csv")
+
+OR_single <- function(index){
+  tab <- (sim_results[,index])
+  OR <- (tab[5]/(tab[3]-tab[5])/(tab[4]/(tab[2]-tab[4])))
+  OR
+}
+
+
+OR_multiple <- function(index){
+  tab <- rowSums(sim_results[,index])
+  OR <- (tab[5]/(tab[3]-tab[5])/(tab[4]/(tab[2]-tab[4])))
+  OR
+}
+
+single_time_point_ORs <- lapply(1:10,OR_single) %>% 
+  unlist()
+
+# length should be odd number
+approximation_test <- function(ORs,period){
+  midpoint <- ORs[median(period)]
+  avg <- OR_multiple(period)
+  # avg <- ORs[max(period)]
+  c(midpoint,avg)
+}
+
+results <- c()
+counter <- 1
+for(j in c(3,5,7)){
+  window <- j-1
+  for(i in 1:10){
+  if( (j==3 & i<=8) | (j==5 & i <=6) | (j==7 & i<=4)){
+  results[[counter]] <- c(paste0(i,'-',i+window),approximation_test(single_time_point_ORs,i:(i+window)))
+  counter <- counter+1
+  }
+  }
+}
+
+results <- do.call(rbind,results) %>% 
+  na.omit() %>% 
+  as.data.frame()
+
+results$V2 <- as.numeric(results$V2)
+results$V3 <- as.numeric(results$V3)
+colnames(results) <- c("Age range","Midpoint OR","Overall OR")
+knitr::kable(data.frame(Age=1:10,OR=single_time_point_ORs),digits = 4,caption = "Age-specific OR",align='c')
+knitr::kable(results,digits = 4,caption = "Midpoint approxmiation",align='c')
+write_excel_csv(results %>% 
+            mutate(`Age range` = as.character(`Age range`),
+                   `Age range` = str_replace(`Age range`,"-"," -- ")),"../tables/SM_tab2.csv")
+```
+
+\newpage
+
+## Stan codes
+
+### Dose-response model
+
+```{stan, output.var="ex2", code=readLines('MA/abx_ma.stan'),echo=T}
+```
